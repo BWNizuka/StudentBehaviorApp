@@ -1,65 +1,104 @@
 import streamlit as st
 import tempfile
 import cv2
+import os
 from ultralytics import YOLO
 
-st.set_page_config(page_title="Student Behavior Detection")
+st.set_page_config(page_title="Student Behavior Detection", layout="wide")
 
-st.title("🎓 Student Behavior Detection")
+st.title("🎓 Student Behavior Detection using YOLO")
 
-# Load model
-model = YOLO("best.pt")
+st.markdown("### Step 1: Upload your trained YOLO model (.pt)")
+uploaded_model = st.file_uploader(
+    "Upload best.pt",
+    type=["pt"]
+)
 
-uploaded_file = st.file_uploader(
-    "Upload a classroom video",
+st.markdown("### Step 2: Upload a classroom video")
+uploaded_video = st.file_uploader(
+    "Upload video",
     type=["mp4", "avi", "mov"]
 )
 
-if uploaded_file:
+if uploaded_model is not None and uploaded_video is not None:
 
-    # Save uploaded file
-    temp_file = tempfile.NamedTemporaryFile(delete=False)
-    temp_file.write(uploaded_file.read())
+    with st.spinner("Loading model..."):
 
-    cap = cv2.VideoCapture(temp_file.name)
+        # Save uploaded model temporarily
+        model_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pt")
+        model_file.write(uploaded_model.read())
+        model_file.close()
 
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps = cap.get(cv2.CAP_PROP_FPS)
+        # Load YOLO model
+        model = YOLO(model_file.name)
 
-    output_file = "output.mp4"
+    st.success("✅ Model loaded successfully!")
 
-    writer = cv2.VideoWriter(
-        output_file,
-        cv2.VideoWriter_fourcc(*"mp4v"),
-        fps,
-        (width, height),
-    )
+    with st.spinner("Processing video..."):
 
-    progress = st.progress(0)
+        # Save uploaded video temporarily
+        video_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+        video_file.write(uploaded_video.read())
+        video_file.close()
 
-    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    current = 0
+        cap = cv2.VideoCapture(video_file.name)
 
-    while cap.isOpened():
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
 
-        success, frame = cap.read()
+        if fps == 0:
+            fps = 30
 
-        if not success:
-            break
+        output_path = "output.mp4"
 
-        results = model(frame)
+        writer = cv2.VideoWriter(
+            output_path,
+            cv2.VideoWriter_fourcc(*"mp4v"),
+            fps,
+            (width, height)
+        )
 
-        annotated = results[0].plot()
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        progress = st.progress(0)
 
-        writer.write(annotated)
+        frame_count = 0
 
-        current += 1
-        progress.progress(current / total)
+        while cap.isOpened():
 
-    cap.release()
-    writer.release()
+            success, frame = cap.read()
 
-    st.success("Finished!")
+            if not success:
+                break
 
-    st.video(output_file)
+            # YOLO prediction
+            results = model(frame)
+
+            # Draw detections
+            annotated = results[0].plot()
+
+            writer.write(annotated)
+
+            frame_count += 1
+
+            if total_frames > 0:
+                progress.progress(frame_count / total_frames)
+
+        cap.release()
+        writer.release()
+
+    st.success("🎉 Detection completed!")
+
+    st.video(output_path)
+
+    with open(output_path, "rb") as file:
+        st.download_button(
+            "📥 Download Processed Video",
+            file,
+            file_name="student_behavior_detection.mp4",
+            mime="video/mp4"
+        )
+
+    # Remove temporary files
+    os.remove(model_file.name)
+    os.remove(video_file.name)
