@@ -6,99 +6,78 @@ from ultralytics import YOLO
 
 st.set_page_config(page_title="Student Behavior Detection", layout="wide")
 
-st.title("🎓 Student Behavior Detection using YOLO")
+st.title("🎓 Student Behavior Detection")
 
-st.markdown("### Step 1: Upload your trained YOLO model (.pt)")
+st.write("### Step 1: Upload your trained model (.pt)")
 uploaded_model = st.file_uploader(
-    "Upload best.pt",
+    "Choose your YOLO model",
     type=["pt"]
 )
 
-st.markdown("### Step 2: Upload a classroom video")
+st.write("### Step 2: Upload a classroom video")
 uploaded_video = st.file_uploader(
-    "Upload video",
+    "Choose a video",
     type=["mp4", "avi", "mov"]
 )
 
-if uploaded_model is not None and uploaded_video is not None:
+if uploaded_model and uploaded_video:
 
+    # Save uploaded model
+    model_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".pt")
+    model_temp.write(uploaded_model.read())
+    model_temp.close()
+
+    # Load model
     with st.spinner("Loading model..."):
+        model = YOLO(model_temp.name)
 
-        # Save uploaded model temporarily
-        model_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pt")
-        model_file.write(uploaded_model.read())
-        model_file.close()
+    st.success("✅ Model loaded!")
 
-        # Load YOLO model
-        model = YOLO(model_file.name)
+    # Save uploaded video
+    video_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+    video_temp.write(uploaded_video.read())
+    video_temp.close()
 
-    st.success("✅ Model loaded successfully!")
+    cap = cv2.VideoCapture(video_temp.name)
 
-    with st.spinner("Processing video..."):
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-        # Save uploaded video temporarily
-        video_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
-        video_file.write(uploaded_video.read())
-        video_file.close()
+    progress_bar = st.progress(0)
 
-        cap = cv2.VideoCapture(video_file.name)
+    # Placeholder for displaying frames
+    video_placeholder = st.empty()
 
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        fps = cap.get(cv2.CAP_PROP_FPS)
+    frame_number = 0
 
-        if fps == 0:
-            fps = 30
+    while cap.isOpened():
 
-        output_path = "output.mp4"
+        success, frame = cap.read()
 
-        writer = cv2.VideoWriter(
-            output_path,
-            cv2.VideoWriter_fourcc(*"mp4v"),
-            fps,
-            (width, height)
+        if not success:
+            break
+
+        # YOLO inference
+        results = model(frame)
+
+        # Draw detections
+        annotated_frame = results[0].plot()
+
+        # Display in Streamlit
+        video_placeholder.image(
+            annotated_frame,
+            channels="BGR",
+            use_container_width=True
         )
 
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        progress = st.progress(0)
+        frame_number += 1
 
-        frame_count = 0
+        if total_frames > 0:
+            progress_bar.progress(frame_number / total_frames)
 
-        while cap.isOpened():
-
-            success, frame = cap.read()
-
-            if not success:
-                break
-
-            # YOLO prediction
-            results = model(frame)
-
-            # Draw detections
-            annotated = results[0].plot()
-
-            writer.write(annotated)
-
-            frame_count += 1
-
-            if total_frames > 0:
-                progress.progress(frame_count / total_frames)
-
-        cap.release()
-        writer.release()
+    cap.release()
 
     st.success("🎉 Detection completed!")
 
-    st.video(output_path)
-
-    with open(output_path, "rb") as file:
-        st.download_button(
-            "📥 Download Processed Video",
-            file,
-            file_name="student_behavior_detection.mp4",
-            mime="video/mp4"
-        )
-
-    # Remove temporary files
-    os.remove(model_file.name)
-    os.remove(video_file.name)
+    # Delete temporary files
+    os.remove(model_temp.name)
+    os.remove(video_temp.name)
