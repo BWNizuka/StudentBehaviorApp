@@ -1,13 +1,13 @@
 import streamlit as st
 import tempfile
 import cv2
+import imageio.v2 as imageio
 import os
-import subprocess
 from ultralytics import YOLO
 
 st.set_page_config(page_title="Student Behavior Detection", layout="wide")
 
-st.title("🎓 Student Behavior Detection using YOLO")
+st.title("🎓 Student Behavior Detection")
 
 # Upload model
 uploaded_model = st.file_uploader(
@@ -33,20 +33,15 @@ if uploaded_model is not None and uploaded_video is not None:
     video_file.write(uploaded_video.read())
     video_file.close()
 
-    # Load YOLO model
     with st.spinner("Loading YOLO model..."):
         model = YOLO(model_file.name)
-
-    st.success("Model loaded successfully!")
 
     cap = cv2.VideoCapture(video_file.name)
 
     if not cap.isOpened():
-        st.error("Cannot open uploaded video.")
+        st.error("Cannot open video.")
         st.stop()
 
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = cap.get(cv2.CAP_PROP_FPS)
 
     if fps <= 0:
@@ -54,89 +49,57 @@ if uploaded_model is not None and uploaded_video is not None:
 
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-    raw_output = "detected_raw.mp4"
-    final_output = "detected_video.mp4"
+    output_video = "detected_video.mp4"
 
-    writer = cv2.VideoWriter(
-        raw_output,
-        cv2.VideoWriter_fourcc(*"mp4v"),
-        fps,
-        (width, height)
+    writer = imageio.get_writer(
+        output_video,
+        fps=fps
     )
-
-    if not writer.isOpened():
-        st.error("Failed to create output video.")
-        st.stop()
 
     progress = st.progress(0)
     status = st.empty()
 
-    frame_number = 0
+    frame = 0
 
-    with st.spinner("Detecting student behaviors..."):
+    while True:
 
-        while True:
+        ret, image = cap.read()
 
-            success, frame = cap.read()
+        if not ret:
+            break
 
-            if not success:
-                break
-
-            results = model.predict(
-                frame,
-                conf=0.5,
-                verbose=False
-            )
-
-            annotated = results[0].plot()
-
-            writer.write(annotated)
-
-            frame_number += 1
-
-            if total_frames > 0:
-                progress.progress(min(frame_number / total_frames, 1.0))
-
-            status.text(f"Processing frame {frame_number}/{total_frames}")
-
-    cap.release()
-    writer.release()
-
-    status.text("Converting video to browser-compatible format...")
-
-    try:
-
-        subprocess.run(
-            [
-                "ffmpeg",
-                "-y",
-                "-i",
-                raw_output,
-                "-vcodec",
-                "libx264",
-                "-pix_fmt",
-                "yuv420p",
-                "-movflags",
-                "+faststart",
-                final_output,
-            ],
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+        results = model.predict(
+            image,
+            conf=0.5,
+            verbose=False
         )
 
-        st.success("Detection completed!")
+        annotated = results[0].plot()
 
-        st.subheader("Detected Video")
+        # Convert BGR → RGB
+        annotated = cv2.cvtColor(
+            annotated,
+            cv2.COLOR_BGR2RGB
+        )
 
-        with open(final_output, "rb") as f:
-            st.video(f.read())
+        writer.append_data(annotated)
 
-    except subprocess.CalledProcessError as e:
+        frame += 1
 
-        st.error("FFmpeg failed to convert the video.")
-        st.text(e.stderr.decode())
+        if total_frames > 0:
+            progress.progress(frame / total_frames)
 
-    # Clean temporary uploaded files
+        status.text(f"Processing frame {frame}/{total_frames}")
+
+    cap.release()
+    writer.close()
+
+    st.success("✅ Detection completed!")
+
+    st.subheader("Detected Video")
+
+    with open(output_video, "rb") as f:
+        st.video(f.read())
+
     os.remove(model_file.name)
     os.remove(video_file.name)
