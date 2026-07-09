@@ -1,7 +1,7 @@
 import streamlit as st
 import tempfile
-import cv2
 import os
+import glob
 from ultralytics import YOLO
 
 st.set_page_config(page_title="Student Behavior Detection", layout="wide")
@@ -10,98 +10,73 @@ st.title("🎓 Student Behavior Detection")
 
 # Upload model
 uploaded_model = st.file_uploader(
-    "Upload YOLO model (.pt)",
+    "Upload YOLO Model (.pt)",
     type=["pt"]
 )
 
 # Upload video
 uploaded_video = st.file_uploader(
-    "Upload classroom video",
+    "Upload Classroom Video",
     type=["mp4", "avi", "mov"]
 )
 
 if uploaded_model and uploaded_video:
 
-    # Save model
+    # Save uploaded model
     model_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pt")
     model_file.write(uploaded_model.read())
     model_file.close()
-
-    # Load model
-    with st.spinner("Loading model..."):
-        model = YOLO(model_file.name)
 
     # Save uploaded video
     video_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
     video_file.write(uploaded_video.read())
     video_file.close()
 
-    cap = cv2.VideoCapture(video_file.name)
+    with st.spinner("Loading model..."):
+        model = YOLO(model_file.name)
 
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps = cap.get(cv2.CAP_PROP_FPS)
-
-    if fps == 0:
-        fps = 30
-
-    output_path = "detected_video.mp4"
-
-    writer = cv2.VideoWriter(
-        output_path,
-        cv2.VideoWriter_fourcc(*"mp4v"),
-        fps,
-        (width, height)
-    )
-
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     progress = st.progress(0)
     status = st.empty()
 
-    frame = 0
+    status.write("Running detection...")
 
-    with st.spinner("Running detection..."):
+    # Run YOLO on the whole video
+    results = model.predict(
+        source=video_file.name,
+        save=True,
+        conf=0.5,
+        project="runs",
+        name="streamlit",
+        exist_ok=True,
+        verbose=False
+    )
 
-        while cap.isOpened():
+    progress.progress(100)
 
-            success, image = cap.read()
+    # Find output video
+    output_folder = "runs/streamlit"
 
-            if not success:
-                break
+    video_extensions = ("*.mp4", "*.avi", "*.mov")
 
-            results = model.predict(
-                image,
-                conf=0.5,
-                verbose=False
-            )
+    output_video = None
 
-            annotated = results[0].plot()
+    for ext in video_extensions:
+        files = glob.glob(os.path.join(output_folder, ext))
+        if files:
+            output_video = files[0]
+            break
 
-            writer.write(annotated)
+    if output_video:
 
-            frame += 1
+        st.success("✅ Detection Completed!")
 
-            if total_frames > 0:
-                progress.progress(frame / total_frames)
+        st.subheader("Detected Video")
 
-            status.text(f"Processing frame {frame}/{total_frames}")
+        with open(output_video, "rb") as f:
+            st.video(f.read())
 
-    cap.release()
-    writer.release()
-
-    st.success("✅ Detection completed!")
-
-    st.subheader("Detected Video")
-
-    st.video(output_path)
-
-    # Optional download button
-    with open(output_path, "rb") as f:
-        st.download_button(
-            "Download detected video",
-            f,
-            file_name="detected_video.mp4"
-        )
+    else:
+        st.error("No output video found.")
 
     os.remove(model_file.name)
     os.remove(video_file.name)
